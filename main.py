@@ -5,15 +5,12 @@ import random
 import string
 import requests
 from datetime import datetime
-from config import CONFIG  # This file should export your configuration list
+from config import CONFIG  # Make sure config.py exists in the same directory
 
 # --- Global Variables & Settings ---
 api_base_url = "https://gateway-run.bls.dev/api/v1"
 ping_interval = 120  # seconds between pings
 max_ping_errors = 3
-
-# Set this flag to True to use proxies from your configuration; set it to False to ignore proxies.
-USE_PROXY = True
 
 # Common headers used in HTTP requests.
 common_headers = {
@@ -21,6 +18,9 @@ common_headers = {
     "Accept": "application/json, text/plain, */*",
     "Accept-Language": "en-US,en;q=0.9"
 }
+
+# Global flag for proxy usage.
+USE_PROXY = False  # Default; will be set by user prompt.
 
 # --- Helper Functions ---
 def get_formatted_time():
@@ -30,6 +30,13 @@ def get_formatted_time():
 def generate_random_hardware_info():
     # Generates example hardware info.
     return {"random": ''.join(random.choices(string.ascii_letters + string.digits, k=8))}
+
+def prompt_proxy_usage():
+    choice = input("Do you want to use proxy? (Y/N): ").strip().lower()
+    if choice in ('y', 'yes'):
+        return True
+    else:
+        return False
 
 # --- Network Functions ---
 def register_node(node_id, hardware_id, ip_address, auth_token, hardware_info, proxy=None):
@@ -120,7 +127,7 @@ def check_service_health(proxy=None):
 def process_node(node, user_token, hardware_info):
     node_id = node.get("nodeId")
     hardware_id = node.get("hardwareId")
-    # Determine proxy usage: if USE_PROXY is True, get proxy from node configuration; otherwise, use None.
+    # Determine proxy usage: use the node's proxy if USE_PROXY is True, otherwise None.
     proxy = node.get("proxy") if USE_PROXY else None
     # For demonstration purposes, using a placeholder IP address.
     ip_address = "127.0.0.1"
@@ -149,13 +156,17 @@ def process_node(node, user_token, hardware_info):
 
 # --- Main Execution Function ---
 def run_all():
+    global USE_PROXY
+    # Prompt the user for proxy usage.
+    USE_PROXY = prompt_proxy_usage()
+    print(f"{get_formatted_time()} Using proxy: {USE_PROXY}")
+
     threads = []
-    # CONFIG structure is assumed to be a list of user objects.
+    # Iterate through each user in the configuration.
     for user in CONFIG:
         user_token = user.get("usertoken")
         for node in user.get("nodes", []):
             # Use the hardware info provided in the node configuration.
-            # If you prefer to generate default hardware info for each node, adjust accordingly.
             hardware_info = {"hardwareId": node.get("hardwareId")}
             t = threading.Thread(target=process_node, args=(node, user_token, hardware_info))
             t.start()
