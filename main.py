@@ -3,14 +3,17 @@ import threading
 import time
 import random
 import string
-import requests
+import cloudscraper  # instead of requests
 from datetime import datetime
-from config import CONFIG  # Make sure config.py exists in the same directory
+from config import CONFIG  # This file should contain your CONFIG list
 
 # --- Global Variables & Settings ---
 api_base_url = "https://gateway-run.bls.dev/api/v1"
 ping_interval = 120  # seconds between pings
 max_ping_errors = 3
+
+# Global flag for proxy usage.
+USE_PROXY = False  # Will be set by user prompt
 
 # Common headers used in HTTP requests.
 common_headers = {
@@ -19,26 +22,23 @@ common_headers = {
     "Accept-Language": "en-US,en;q=0.9"
 }
 
-# Global flag for proxy usage.
-USE_PROXY = False  # Default; will be set by user prompt.
-
 # --- Helper Functions ---
 def get_formatted_time():
     now = datetime.now()
     return f"[{now.strftime('%H:%M:%S')}]"
 
 def generate_random_hardware_info():
-    # Generates example hardware info.
     return {"random": ''.join(random.choices(string.ascii_letters + string.digits, k=8))}
 
 def prompt_proxy_usage():
     choice = input("Do you want to use proxy? (Y/N): ").strip().lower()
-    if choice in ('y', 'yes'):
-        return True
-    else:
-        return False
+    return choice in ('y', 'yes')
 
-# --- Network Functions ---
+def get_scraper():
+    # Create and return a cloudscraper scraper instance.
+    return cloudscraper.create_scraper()
+
+# --- Network Functions using cloudscraper ---
 def register_node(node_id, hardware_id, ip_address, auth_token, hardware_info, proxy=None):
     url = f"{api_base_url}/nodes/{node_id}"
     payload = {
@@ -48,8 +48,8 @@ def register_node(node_id, hardware_id, ip_address, auth_token, hardware_info, p
         "extensionVersion": "0.1.7"
     }
     proxies = {"http": proxy, "https": proxy} if proxy else None
-
-    response = requests.post(
+    scraper = get_scraper()
+    response = scraper.post(
         url,
         headers={**common_headers,
                  "Content-Type": "application/json",
@@ -68,8 +68,8 @@ def register_node(node_id, hardware_id, ip_address, auth_token, hardware_info, p
 def start_session(node_id, auth_token, proxy=None):
     url = f"{api_base_url}/nodes/{node_id}/start-session"
     proxies = {"http": proxy, "https": proxy} if proxy else None
-
-    response = requests.post(
+    scraper = get_scraper()
+    response = scraper.post(
         url,
         headers={**common_headers, "Authorization": f"Bearer {auth_token}"},
         proxies=proxies
@@ -85,8 +85,8 @@ def start_session(node_id, auth_token, proxy=None):
 def ping_node(node_id, auth_token, proxy=None):
     url = f"{api_base_url}/nodes/{node_id}/ping"
     proxies = {"http": proxy, "https": proxy} if proxy else None
-
-    response = requests.post(
+    scraper = get_scraper()
+    response = scraper.post(
         url,
         headers={**common_headers, "Authorization": f"Bearer {auth_token}"},
         proxies=proxies
@@ -102,8 +102,8 @@ def ping_node(node_id, auth_token, proxy=None):
 def check_node_status(node_id, proxy=None):
     url = f"{api_base_url}/nodes/{node_id}"
     proxies = {"http": proxy, "https": proxy} if proxy else None
-
-    response = requests.get(url, headers=common_headers, proxies=proxies)
+    scraper = get_scraper()
+    response = scraper.get(url, headers=common_headers, proxies=proxies)
     if response.ok:
         print(f"{get_formatted_time()} Node {node_id} status: OK")
     else:
@@ -112,8 +112,8 @@ def check_node_status(node_id, proxy=None):
 def check_service_health(proxy=None):
     url = "https://gateway-run.bls.dev/health"
     proxies = {"http": proxy, "https": proxy} if proxy else None
-
-    response = requests.get(url, headers=common_headers, proxies=proxies)
+    scraper = get_scraper()
+    response = scraper.get(url, headers=common_headers, proxies=proxies)
     try:
         data = response.json()
         if data.get("status") == "ok":
@@ -127,9 +127,8 @@ def check_service_health(proxy=None):
 def process_node(node, user_token, hardware_info):
     node_id = node.get("nodeId")
     hardware_id = node.get("hardwareId")
-    # Determine proxy usage: use the node's proxy if USE_PROXY is True, otherwise None.
     proxy = node.get("proxy") if USE_PROXY else None
-    # For demonstration purposes, using a placeholder IP address.
+    # For demonstration purposes, use a placeholder IP address.
     ip_address = "127.0.0.1"
     print(f"{get_formatted_time()} Processing node {node_id} with hardware ID {hardware_id} and IP {ip_address}")
     try:
@@ -151,27 +150,23 @@ def process_node(node, user_token, hardware_info):
             print(f"{get_formatted_time()} Ping error for node {node_id}: {e} (error count: {ping_errors})")
             if ping_errors >= max_ping_errors:
                 print(f"{get_formatted_time()} Maximum ping errors reached for node {node_id}. Restarting process...")
-                break  # Optionally add re-registration/restarting logic here
+                break
         time.sleep(ping_interval)
 
 # --- Main Execution Function ---
 def run_all():
     global USE_PROXY
-    # Prompt the user for proxy usage.
     USE_PROXY = prompt_proxy_usage()
     print(f"{get_formatted_time()} Using proxy: {USE_PROXY}")
 
     threads = []
-    # Iterate through each user in the configuration.
     for user in CONFIG:
         user_token = user.get("usertoken")
         for node in user.get("nodes", []):
-            # Use the hardware info provided in the node configuration.
             hardware_info = {"hardwareId": node.get("hardwareId")}
             t = threading.Thread(target=process_node, args=(node, user_token, hardware_info))
             t.start()
             threads.append(t)
-
     for t in threads:
         t.join()
 
